@@ -8,6 +8,8 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../src/BlackEagle.Android/Updates/UpdateClient.cs" Link="UpdateClient.cs" />
+    <Compile Include="../../src/BlackEagle.Android/TunnelRecoveryPolicy.cs" Link="TunnelRecoveryPolicy.cs" />
     <Compile Include="../../src/BlackEagle.Android/SplitTunnelPolicy.cs" Link="SplitTunnelPolicy.cs" />
     <ProjectReference Include="../../../linux/src/BlackEagle.Client.UI/BlackEagle.Client.UI.csproj" />
     <Compile Include="../../src/BlackEagle.Android/ProfileReplacement.cs" Link="ProfileReplacement.cs" />

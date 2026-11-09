@@ -1,0 +1,1 @@
+Fixed VPN disconnection from Quick Settings: the tunnel now closes completely without opening the app, immediately restoring normal internet access.

@@ -39,6 +39,19 @@ password are stored outside this repository. The build script's automatic
 `Signed.apk` output still uses SDK signing defaults; it is not the permanently
 signed distribution artifact.
 
+## Direct APK updates
+
+Version 0.5.3 introduces signed update checks from the shared public repository
+https://github.com/kazievnadir-max/blackeagle-release. Downloads start on user
+request; Android confirms installation. See [Android update protocol and release
+steps](docs/ANDROID-UPDATES.md). The first updater-enabled APK must be installed
+manually. [Android 0.5.4](https://github.com/kazievnadir-max/blackeagle-release/releases/tag/android-v0.5.4)
+is the first published release in this update repository.
+
+The current release is [Android 0.5.5](https://github.com/kazievnadir-max/blackeagle-release/releases/tag/android-v0.5.5).
+It fixes VPN shutdown from Quick Settings: the system TUN descriptor is explicitly
+closed, so disconnecting no longer leaves a VPN interface blocking internet access.
+
 ## Licensing
 
 Original client source in this repository is licensed under MIT; see LICENSE.

@@ -160,6 +160,8 @@ public sealed class MobileView : UserControl
         if (attached) return;
         attached = true; model.PropertyChanged += ModelChanged; timer.Start(); QueueRender();
 #if !DESKTOP_SHARED
+        Updates.AndroidUpdates.Instance.Changed += QueueRender;
+        _ = Updates.AndroidUpdates.Instance.CheckAsync(manual: false);
         navigationRoot = TopLevel.GetTopLevel(this);
         if (navigationRoot is not null) navigationRoot.BackRequested += OnBackRequested;
 #endif
@@ -170,6 +172,7 @@ public sealed class MobileView : UserControl
     {
         attached = false; model.PropertyChanged -= ModelChanged; timer.Stop();
 #if !DESKTOP_SHARED
+        Updates.AndroidUpdates.Instance.Changed -= QueueRender;
         if (navigationRoot is not null) navigationRoot.BackRequested -= OnBackRequested;
         navigationRoot = null;
 #endif
@@ -290,6 +293,10 @@ public sealed class MobileView : UserControl
 #endif
         var settings = Button(Icon("settings"), T("Настройки", "Settings"), () => Navigate("settings"));
         panel.Children.Add(Header("", settings, add));
+#if !DESKTOP_SHARED
+        if (Updates.AndroidUpdates.Instance.Release is { } update)
+            panel.Children.Add(Button(Text(T($"Доступна версия {update.Version}", $"Version {update.Version} available")), T("Обновление", "Update"), () => Navigate("settings")));
+#endif
         var hero = new Grid { Height = 138 };
         hero.Children.Add(new global::Avalonia.Controls.Image
         {
@@ -508,6 +515,9 @@ public sealed class MobileView : UserControl
             panel.Children.Add(autostartRow);
             panel.Children.Add(status);
         }
+#if !DESKTOP_SHARED
+        AddUpdateControls(panel);
+#endif
         var version = platform.AppVersion;
         var versionText = Text(T($"Версия {version}", $"Version {version}"), 12, true);
         versionText.HorizontalAlignment = HorizontalAlignment.Center;
@@ -517,6 +527,41 @@ public sealed class MobileView : UserControl
     }
 
 #if !DESKTOP_SHARED
+    /// <summary>Показывает проверку версии, описание выпуска, загрузку и повтор системной установки.</summary>
+    private void AddUpdateControls(StackPanel panel)
+    {
+        var update = Updates.AndroidUpdates.Instance;
+        panel.Children.Add(Text(T("Обновления приложения", "App updates"), 17));
+        var message = update.State switch
+        {
+            "checking" => "",
+            "current" => "",
+            "available" => T("Доступна новая версия.", "A new version is available."),
+            "downloading" => T($"Загрузка: {update.Percent}%", $"Downloading: {update.Percent}%"),
+            "verifying" => T("Проверка файла…", "Verifying download…"),
+            "permission" => T("Разрешите установку из этого приложения, вернитесь и нажмите «Установить».", "Allow installs from this app, return and tap Install."),
+            "installer" => T("Подтвердите обновление в установщике Android. Если отменили — можно повторить.", "Confirm the update in Android's installer. You can retry if cancelled."),
+            "check-error" => T("Не удалось проверить обновление. Проверьте подключение и повторите.", "Could not verify updates. Check your connection and retry."),
+            "download-error" => T("Не удалось загрузить или проверить APK. Повторите загрузку. Обновление требует той же подписи, что и установленная версия.", "Could not download or verify the APK. Retry the download. The update must use the same signing key as the installed app."),
+            "cancelled" => T("Загрузка отменена.", "Download cancelled."),
+            _ => T("Обновления из официального репозитория GitHub.", "Updates from the official GitHub repository.")
+        };
+        if (message.Length > 0) panel.Children.Add(Text(message, 13, true));
+        if (update.Release is { } release)
+        {
+            panel.Children.Add(Text(T($"Версия {release.Version} · {release.Size / 1048576d:F1} МБ", $"Version {release.Version} · {release.Size / 1048576d:F1} MB")));
+            if (release.Notes.Length > 0) panel.Children.Add(Text(release.Notes, 13, true));
+            var label = update.State is "permission" or "installer" ? T("Установить", "Install") : T("Скачать и установить", "Download and install");
+            var download = Button(Text(label), label, () => _ = update.DownloadOrInstallAsync());
+            download.IsEnabled = !update.Busy;
+            panel.Children.Add(download);
+        }
+        if (update.Busy)
+            panel.Children.Add(Button(Text(T("Отменить", "Cancel")), T("Отменить", "Cancel"), update.Cancel));
+        else
+            panel.Children.Add(Button(Text(T("Проверить обновления", "Check for updates")), T("Проверить обновления", "Check for updates"), () => _ = update.CheckAsync(manual: true)));
+    }
+
     /// <summary>Создает отдельную страницу маршрутизации приложений с возвратом в настройки.</summary>
     private Control SplitTunnelPage()
     {

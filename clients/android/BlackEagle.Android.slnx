@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/BlackEagle.Android/BlackEagle.Android.csproj" />
+  <Project Path="tests/BlackEagle.Android.Tests/BlackEagle.Android.Tests.csproj" />
+</Solution>

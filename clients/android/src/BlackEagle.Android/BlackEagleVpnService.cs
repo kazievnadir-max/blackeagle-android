@@ -20,6 +20,10 @@ public sealed class BlackEagleVpnService : VpnService
     private CancellationTokenSource? lifetime;
     private AwgNative.ProtectSocket? protectCallback;
     private bool active;
+    private ParcelFileDescriptor? tunnelDescriptor;
+    private string? engineConfiguration;
+    private long nextRecoveryAt;
+    private int recoveryAttempts;
     internal const string ConnectAction = "com.blackeaglevpn.client.CONNECT";
     private CancellationTokenSource? backgroundConnection;
     private Task backgroundTask = Task.CompletedTask;
@@ -120,10 +124,24 @@ public sealed class BlackEagleVpnService : VpnService
                 .AddRoute("0.0.0.0", 0)!.AddDnsServer(c.Dns)!.SetBlocking(true);
             SplitTunnelPreferences.Apply(builder);
             // No IPv6 address or AllowFamily(AF_INET6): Android blocks IPv6 for this VPN.
-            using var descriptor = builder.Establish() ?? throw new IOException("Разрешение VPN отозвано.");
+            var descriptor = builder.Establish() ?? throw new IOException("Разрешение VPN отозвано.");
             protectCallback = ProtectTransportSocket;
-            var result = AwgNative.Start(descriptor.Fd, configuration, protectCallback);
-            if (result != 0) throw new IOException($"Ошибка запуска AWG ({result}).");
+            try
+            {
+                var result = AwgNative.Start(descriptor.Fd, configuration, protectCallback);
+                if (result != 0) throw new IOException($"Ошибка запуска AWG ({result}).");
+            }
+            catch
+            {
+                try { CloseDescriptor(descriptor); }
+                finally { protectCallback = null; }
+                throw;
+            }
+            // Нативный движок владеет дубликатом FD; оригинал удерживает маршруты при его перезапуске.
+            tunnelDescriptor = descriptor;
+            engineConfiguration = configuration;
+            recoveryAttempts = 0;
+            nextRecoveryAt = 0;
             active = true;
             lifetime = new CancellationTokenSource();
             serviceToken = lifetime.Token;
@@ -151,7 +169,7 @@ public sealed class BlackEagleVpnService : VpnService
         catch { return 0; }
     }
 
-    /// <summary>Проверяет свежесть handshake, сохраняя маршруты туннеля при потере сети.</summary>
+    /// <summary>Восстанавливает AWG при устаревшем handshake, сохраняя TUN и ограничивая частоту повторов.</summary>
     private async Task MonitorAsync(CancellationToken ct)
     {
         try
@@ -163,12 +181,52 @@ public sealed class BlackEagleVpnService : VpnService
                 {
                     ct.ThrowIfCancellationRequested();
                     var seconds = AwgNative.Handshake();
-                    var fresh = seconds > 0 && DateTimeOffset.UtcNow.ToUnixTimeSeconds() - seconds < 180;
+                    var fresh = TunnelRecoveryPolicy.IsFresh(seconds, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
                     AndroidTunnel.Instance.Publish(fresh ? "connected" : "reconnecting", fresh ? "Подключено" : "Восстановление соединения…");
+                    if (fresh)
+                    {
+                        if (recoveryAttempts > 0)
+                            global::Android.Util.Log.Info("BlackEagleVpn", "Tunnel handshake recovered.");
+                        recoveryAttempts = 0;
+                        nextRecoveryAt = 0;
+                    }
+                    else if (active && SystemClock.ElapsedRealtime() >= nextRecoveryAt)
+                    {
+                        RestartEngine();
+                    }
                 }
             }
         }
         catch (System.OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            // Не записываем конфигурацию, адреса, ключи или текст исключения.
+            global::Android.Util.Log.Error("BlackEagleVpn", $"Tunnel monitor stopped: {ex.GetType().Name}");
+            lock (sync)
+            {
+                if (!ct.IsCancellationRequested) CloseTunnel();
+            }
+        }
+    }
+
+    /// <summary>Пересоздает защищенные UDP-сокеты и handshake, удерживая исходный дескриптор TUN.</summary>
+    private void RestartEngine()
+    {
+        if (tunnelDescriptor is null || engineConfiguration is null || protectCallback is null) return;
+        recoveryAttempts = Math.Min(recoveryAttempts + 1, 3);
+        nextRecoveryAt = SystemClock.ElapsedRealtime() + TunnelRecoveryPolicy.RetryDelayMilliseconds(recoveryAttempts);
+        global::Android.Util.Log.Warn("BlackEagleVpn", "Stale handshake; restarting AWG while retaining VPN routes.");
+        try
+        {
+            AwgNative.Stop();
+            var result = AwgNative.Start(tunnelDescriptor.Fd, engineConfiguration, protectCallback);
+            if (result != 0)
+                global::Android.Util.Log.Warn("BlackEagleVpn", $"AWG restart failed: {result}; retry scheduled.");
+        }
+        catch (Exception ex)
+        {
+            global::Android.Util.Log.Warn("BlackEagleVpn", $"AWG restart failed: {ex.GetType().Name}; retry scheduled.");
+        }
     }
 
     /// <summary>Закрывает AWG и TUN, после чего Android восстанавливает обычные маршруты и DNS.</summary>
@@ -177,10 +235,29 @@ public sealed class BlackEagleVpnService : VpnService
         lock (sync)
         {
             lifetime?.Cancel(); lifetime?.Dispose(); lifetime = null;
-            if (active) AwgNative.Stop();
-            active = false; protectCallback = null;
+            try { if (active) AwgNative.Stop(); }
+            finally
+            {
+                var descriptor = tunnelDescriptor;
+                tunnelDescriptor = null;
+                try { CloseDescriptor(descriptor); }
+                finally
+                {
+                    engineConfiguration = null;
+                    recoveryAttempts = 0; nextRecoveryAt = 0;
+                    active = false; protectCallback = null;
+                }
+            }
         }
         AndroidTunnel.Instance.Publish("disconnected", "Отключено");
+    }
+
+    /// <summary>Закрывает системный TUN-дескриптор до освобождения JNI-обертки, не ожидая сборщика мусора.</summary>
+    private static void CloseDescriptor(ParcelFileDescriptor? descriptor)
+    {
+        if (descriptor is null) return;
+        try { descriptor.Close(); }
+        finally { descriptor.Dispose(); }
     }
 
     /// <summary>Останавливает туннель при отзыве разрешения или выборе другого VPN.</summary>

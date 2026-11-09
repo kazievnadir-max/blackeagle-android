@@ -11,3 +11,7 @@
 .env
 .env.*
 **/secrets/
+
+# Private update signing keys (public PEM is tracked explicitly).
+*-private.pem
+update-manifest.pem
