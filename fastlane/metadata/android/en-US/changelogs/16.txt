@@ -1,0 +1,1 @@
+Updated AmneziaWG and Go dependencies. AWG fixes a timer race affecting handshake and keepalive. Includes complete VPN shutdown from Quick Settings.

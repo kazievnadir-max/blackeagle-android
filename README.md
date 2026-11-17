@@ -48,7 +48,8 @@ steps](docs/ANDROID-UPDATES.md). The first updater-enabled APK must be installed
 manually. [Android 0.5.4](https://github.com/kazievnadir-max/blackeagle-release/releases/tag/android-v0.5.4)
 is the first published release in this update repository.
 
-The current release is [Android 0.5.5](https://github.com/kazievnadir-max/blackeagle-release/releases/tag/android-v0.5.5).
+The current release is [Android 0.5.6](https://github.com/kazievnadir-max/blackeagle-release/releases/tag/android-v0.5.6).
+It updates AmneziaWG to v3.1.20261116 and Go networking/cryptography dependencies.
 It fixes VPN shutdown from Quick Settings: the system TUN descriptor is explicitly
 closed, so disconnecting no longer leaves a VPN interface blocking internet access.
 
